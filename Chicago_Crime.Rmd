@@ -1,0 +1,668 @@
+---
+title: "Chicago Crime Analysis"
+output:
+  html_document:
+    df_print: paged
+---
+
+This is an analysis of crime rates in Chicago. Crime statistics were collected from [The Federal Bureau of Investigation](https://crime-data-explorer.fr.cloud.gov/pages/explorer/crime/crime-trend) and population data was collected from [FRED Economic Data](https://fred.stlouisfed.org/series/ILCOOK1POP).
+
+
+# Data Prep
+
+## Load packages
+```{r}
+library(tidyr)
+library(ggplot2)
+library(dplyr)
+library(readr)
+library(scales)
+library(lubridate)
+```
+
+
+
+
+
+## [Population Data](https://fred.stlouisfed.org/series/ILCOOK1POP) 
+### United States 
+```{r}
+# US Pop
+Population_US <- read.csv("./Population/Population_US.csv")
+
+# Create column called 'population'
+Population_US$population <- Population_US$B230RC0A052NBEA
+
+# Remove old columns
+Population_US$B230RC0A052NBEA<-NULL
+
+# Create Year Column for Join
+Population_US$year<-substr(Population_US$DATE,0,4)
+
+```
+
+### Cook County (Chicago) 
+```{r}
+# Cook County Pop
+Population_Cook <- read.csv("./Population/Population_CookCounty.csv")
+
+# Create column called 'population'
+Population_Cook$population <- Population_Cook$ILCOOK1POP
+
+# Remove old columns
+Population_Cook$ILCOOK1POP<-NULL
+
+# Create Year Column for Join
+Population_Cook$year<-substr(Population_Cook$DATE,0,4)
+
+```
+
+### Los Angeles 
+```{r}
+# Los Angeles County Pop
+Population_LA <- read.csv("./Population/Population_LosAngeles.csv")
+
+# Create column called 'population'
+Population_LA$population <- Population_LA$CALOSA7POP
+
+# Remove old columns
+Population_LA$CALOSA7POP <-NULL
+
+# Create Year Column for Join
+Population_LA$year<-substr(Population_LA$DATE,0,4)
+
+```
+
+### New York City (5 boroughs) 
+```{r}
+# Pull in borough data
+Population_Manhattan <- read.csv("./Population/Population_NYCounty.csv") #New York County = Manhattan
+Population_Brooklyn <- read.csv("./Population/Population_Kings.csv") #Kings County = Brooklyn
+Population_Bronx <- read.csv("./Population/Population_Bronx.csv") #Bronx County
+Population_Staten <- read.csv("./Population/Population_Richmond.csv") #Richmond County = Staten Island
+Population_Queens <- read.csv("./Population/Population_Queens.csv") #Queens County
+
+Population_NYC<-left_join(Population_Manhattan,Population_Brooklyn,'DATE')
+Population_NYC<-left_join(Population_NYC,Population_Bronx,'DATE')
+Population_NYC<-left_join(Population_NYC,Population_Staten,'DATE')
+Population_NYC<-left_join(Population_NYC,Population_Queens,'DATE')
+
+# Create column called 'population'
+Population_NYC<-Population_NYC %>% 
+  group_by(DATE) %>% 
+  summarize(population = NYNEWY1POP+NYKING7POP+NYBRON5POP+NYRICH5POP+NYQUEE1POP)
+
+# Create Year Column for Join
+Population_NYC$year<-substr(Population_NYC$DATE,0,4)
+
+```
+
+
+
+
+
+## [Crime Data](https://crime-data-explorer.fr.cloud.gov/pages/explorer/crime/crime-trend)
+### United States Overall 
+```{r}
+
+# Create Tables for United States Stats (rates per 100K people per year)
+AggravatedAssault <- read.csv("./Crime/AggravatedAssault.csv")
+AllViolentCrime <- read.csv("./Crime/AllViolentCrime.csv")
+Burglary <- read.csv("./Crime/Burglary.csv")
+Homicide<- read.csv("./Crime/Homicide.csv")
+MotorVehicleTheft <- read.csv("./Crime/MotorVehicleTheft.csv")
+Robbery <- read.csv("./Crime/Robbery.csv")
+
+# Tag Type in each dataset (facilitates transpose)
+AggravatedAssault$Type <- 'Aggravated Assault'
+AllViolentCrime$Type <- 'All Violent Crime'
+Burglary$Type <- 'Burglary'
+Homicide$Type <- 'Homicide'
+MotorVehicleTheft$Type <- 'Motor Vehicle Theft'
+Robbery$Type <- 'Robbery'
+
+# Stack Data
+US.df<-bind_rows(AggravatedAssault, AllViolentCrime,Burglary,Homicide,MotorVehicleTheft,Robbery)
+
+# Pivot longer to create date column
+US.df<-US.df %>% 
+  pivot_longer(contains('x'),'year') %>% 
+  mutate(year = gsub('X','',year),
+         location = 'USA')
+
+# Join on population Data
+paste0('US has ',nrow(US.df),' rows prior to join')
+US.df<-left_join(US.df, Population_US, 'year')
+paste0('US has ',nrow(US.df),' rows after join')
+
+
+
+```
+
+### Chicago 
+```{r}
+# Chicago Specific (reported as raw number (not per 100K people))
+AggravatedAssault_C <- read.csv("./Crime/AggravatedAssault_C.csv")
+AllViolentCrime_C <- read.csv("./Crime/AllViolentCrime_C.csv")
+Burglary_C <- read.csv("./Crime/Burglary_C.csv")
+Homicide_C<- read.csv("./Crime/Homicide_C.csv")
+MotorVehicleTheft_C <- read.csv("./Crime/MotorVehicleTheft_C.csv")
+Robbery_C <- read.csv("./Crime/Robbery_C.csv")
+
+# Tag Type in each dataset (facilitates transpose)
+AggravatedAssault_C$Type <- 'Aggravated Assault'
+AllViolentCrime_C$Type <- 'All Violent Crime'
+Burglary_C$Type <- 'Burglary'
+Homicide_C$Type <- 'Homicide'
+MotorVehicleTheft_C$Type <- 'Motor Vehicle Theft'
+Robbery_C$Type <- 'Robbery'
+
+# Stack Data for Chicago (Cook County)
+Cook.df<-bind_rows(AggravatedAssault_C, AllViolentCrime_C,Burglary_C,Homicide_C,MotorVehicleTheft_C,Robbery_C)
+
+# Pivot longer to create date column
+Cook.df<- Cook.df %>% 
+  filter(series == 'Reported') %>% 
+  pivot_longer(contains('x'),'year') %>% 
+  mutate(year = gsub('X','',year),
+         location = 'Chicago')
+
+# Join on Population Data
+paste0('Cook has ',nrow(Cook.df),' rows prior to join')
+Cook.df<-left_join(Cook.df, Population_Cook, 'year')
+paste0('Cook has ',nrow(Cook.df),' rows after join')
+
+# Adjust Cook County's crimes to be listed as per 100K people (same as US Data)
+Cook.df$value <- Cook.df$value/(Cook.df$population*1000/100000)
+```
+
+### LA 
+```{r}
+# LA Specific (reported as raw number (not per 100K people))
+AggravatedAssault_LA <- read.csv("./Crime/AggravatedAssault_LA.csv")
+AllViolentCrime_LA <- read.csv("./Crime/AllViolentCrime_LA.csv")
+Burglary_LA <- read.csv("./Crime/Burglary_LA.csv")
+Homicide_LA<- read.csv("./Crime/Homicide_LA.csv")
+MotorVehicleTheft_LA <- read.csv("./Crime/MotorVehicleTheft_LA.csv")
+Robbery_LA <- read.csv("./Crime/Robbery_LA.csv")
+
+# Tag Type in each dataset (facilitates transpose)
+AggravatedAssault_LA$Type <- 'Aggravated Assault'
+AllViolentCrime_LA$Type <- 'All Violent Crime'
+Burglary_LA$Type <- 'Burglary'
+Homicide_LA$Type <- 'Homicide'
+MotorVehicleTheft_LA$Type <- 'Motor Vehicle Theft'
+Robbery_LA$Type <- 'Robbery'
+
+# Stack Data for LA
+LA.df<-bind_rows(AggravatedAssault_LA, AllViolentCrime_LA,Burglary_LA,Homicide_LA,MotorVehicleTheft_LA,Robbery_LA)
+
+# Pivot longer to create date column
+LA.df<- LA.df %>% 
+  filter(series == 'Reported') %>% 
+  pivot_longer(contains('x'),'year') %>% 
+  mutate(year = gsub('X','',year),
+         location = 'LA')
+
+# Join on Population Data
+paste0('LA has ',nrow(LA.df),' rows prior to join')
+LA.df<-left_join(LA.df, Population_LA, 'year')
+paste0('LA has ',nrow(LA.df),' rows after join')
+
+# Adjust LA County's crimes to be listed as per 100K people (same as US Data)
+LA.df$value <- LA.df$value/(LA.df$population*1000/100000)
+```
+
+### New York City (NYC) 
+```{r}
+# NYC Specific (reported as raw number (not per 100K people))
+AggravatedAssault_NY <- read.csv("./Crime/AggravatedAssault_NY.csv")
+AllViolentCrime_NY <- read.csv("./Crime/AllViolentCrime_NY.csv")
+Burglary_NY <- read.csv("./Crime/Burglary_NY.csv")
+Homicide_NY<- read.csv("./Crime/Homicide_NY.csv")
+MotorVehicleTheft_NY <- read.csv("./Crime/MotorVehicleTheft_NY.csv")
+Robbery_NY <- read.csv("./Crime/Robbery_NY.csv")
+
+# Tag Type in each dataset (facilitates transpose)
+AggravatedAssault_NY$Type <- 'Aggravated Assault'
+AllViolentCrime_NY$Type <- 'All Violent Crime'
+Burglary_NY$Type <- 'Burglary'
+Homicide_NY$Type <- 'Homicide'
+MotorVehicleTheft_NY$Type <- 'Motor Vehicle Theft'
+Robbery_NY$Type <- 'Robbery'
+
+# Stack Data for NYC
+NYC.df<-bind_rows(AggravatedAssault_NY, AllViolentCrime_NY,Burglary_NY,Homicide_NY,MotorVehicleTheft_NY,Robbery_NY)
+
+# Pivot longer to create date column
+NYC.df<- NYC.df %>% 
+  filter(series == 'Reported') %>% 
+  pivot_longer(contains('x'),'year') %>% 
+  mutate(year = gsub('X','',year),
+         location = 'NYC')
+
+# Join on Population Data
+paste0('NYC has ',nrow(NYC.df),' rows prior to join')
+NYC.df<-left_join(NYC.df, Population_NYC, 'year')
+paste0('NYC has ',nrow(NYC.df),' rows after join')
+
+# Adjust NYC crimes to be listed as per 100K people (same as US Data)
+NYC.df$value <- NYC.df$value/(NYC.df$population*1000/100000)
+
+```
+
+
+
+## Stack Datasets & Remove 2021
+```{r}
+# Stack datasets
+df <- bind_rows(US.df, Cook.df, NYC.df,LA.df)
+df<-df %>%
+  select(year, location, 'type' = Type, 'crimes.per' = value, population)  # Select headers
+df$crimes<-df$crimes.per*(df$population*1000/100000) # (crimes per 100K people)x(population in hundred thousands)
+                                                  # population is listed in thousands in the data
+df<- df %>% 
+  filter(year != '2021') #2021 data was incomplete for Chicago and not reported for LA & NYC
+```
+
+
+
+
+
+
+# Data Overview
+
+## All Violent Crime: Chicago, LA, & NYC
+
+### Graph: Total violent Crime Over Time
+```{r, echo=FALSE}
+# Total Violent Crime over time
+df %>% 
+  filter(type == "All Violent Crime") %>%
+  filter(location != 'USA') %>% 
+  group_by(location, year) %>% 
+  summarize(crimes = sum(crimes)) %>% 
+  ggplot(aes(x = as.integer(year), y = crimes, color = location))+
+  geom_line()+
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  xlab('Year')+
+  ylab('Violent Crimes')+
+  ggtitle('Total Violent Crimes (1991-2020)')+
+  scale_color_manual(values = c('NYC' = 'blue',
+                                'Chicago' = 'red',
+                                'LA' = 'lightblue3'))
+
+```
+
+### Table: Total Violent Crime Over Time
+```{r}
+# Table detailing All Violent Crime by year and city
+table1<-df %>% 
+  filter(location != "USA" & type == 'All Violent Crime' & year > '2016') %>% 
+  group_by(location, year) %>% 
+  summarize(crimes = sum(crimes)) %>%
+  pivot_wider(names_from = year, values_from = crimes)
+
+print(table1)
+```
+
+
+## Crimes per 100K People (crimes per capita)
+
+### Graph: Violent Crime per Capita - Chicago, LA, & NYC
+```{r, echo=FALSE}
+# Total Violent Crime over time
+df %>% 
+  filter(type == "All Violent Crime") %>%
+  group_by(location, year) %>% 
+  summarize(crimes = sum(crimes.per)) %>% 
+  ggplot(aes(x = as.integer(year), y = crimes, color = location))+
+  geom_line()+
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  xlab('Year')+
+  ylab('Violent Crimes per 100K People')+
+  ggtitle('Total Violent Crimes per 100K People (1991-2020)')+
+  scale_color_manual(values = c('NYC' = 'blue',
+                                'Chicago' = 'red',
+                                'LA' = 'lightblue3',
+                                'USA' = 'black'))
+
+```
+
+### Facet Wrap: Past 3 years
+```{r}
+df %>% 
+  filter(year > '2016') %>%   # Added filter for 2017-2020
+  group_by(location, type, year) %>% 
+  summarize(crimes = sum(crimes.per)) %>% 
+  ggplot(aes(x = as.integer(year), y = crimes, color = location))+
+  geom_line()+
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  facet_wrap(type~.)+
+  ggtitle('Crimes per Capita by Location')+
+  scale_color_manual(values = c('NYC' = 'blue2',
+                                'Chicago' = 'red',
+                                'LA' = 'lightblue3',
+                                'USA' = 'black'))+
+  ylab('Crimes per 100K People')+
+  xlab('Year')
+  
+```
+
+
+
+## [All Chicago Crime Data](https://data.cityofchicago.org/Public-Safety/Crimes-2001-to-Present/ijzp-q8t2)
+
+### Clean File: All Chicago Crime
+#### Load & filter Chicago source data 
+```{r}
+
+###### Full dataset from city of chicago (https://data.cityofchicago.org/Public-Safety/Crimes-2001-to-Present/ijzp-q8t2) ######
+###### LONG RUN TIME. ONLY RUN IF NEED REFRESH. OTHERWISE USE 'ChicagoViolent.Post2017' ######
+
+#ChicagoAll.df <- read.csv("./Chicago_All_Crime/Crimes_2001_to_Present.csv")
+```
+
+#### Write smaller file for use in analysis
+```{r}
+
+###### Filter full dataset to scope (violent crimes 2018 to present) ######
+
+# ChicagoViolent.Post2017<-ChicagoAll.df %>%
+#   select(Year, Case.Number, Date, Primary.Type, Description,
+#          Location.Description, Domestic, District, Ward,
+#          Community.Area, FBI.Code, Latitude, Longitude) %>%
+#   filter(Year > 2017 &
+#           !Primary.Type %in% c("CONCEALED CARRY LICENSE VIOLATION", "CRIMINAL DAMAGE", "CRIMINAL TRESPASS",
+#                                 "DECEPTIVE PRACTICE", "GAMBLING", "INTERFERENCE WITH PUBLIC OFFICER",
+#                                 "LIQUOR LAW VIOLATION", "NARCOTICS","NON-CRIMINAL", "STALKING",
+#                                 "NON-CRIMINAL (SUBJECT SPECIFIED)", "OBSCENITY", "OFFENSE INVOLVING CHILDREN",
+#                                 "OTHER NARCOTIC VIOLATION","OTHER OFFENSE","PROSTITUTION","PUBLIC INDECENCY",
+#                                 "PUBLIC PEACE VIOLATION", "RITUALISM", "WEAPONS VIOLATION", "HUMAN TRAFFICKING"))
+
+
+###### Create new dataset 'ChicagoViolent.Post2017'. Use this dataset for analysis going forward ######
+
+# write.csv(ChicagoViolent.Post2017, "./Chicago_All_Crime/ChicagoPost2017.csv", row.names=FALSE)
+
+```
+
+#### Load new CSV File
+```{r}
+chi_violent.df <- read.csv("./Chicago_All_Crime/ChicagoPost2017.csv")
+```
+
+
+#### Name & Date Cleaning
+```{r}
+# Name Cleaning
+
+chi_violent.df<- chi_violent.df %>% # Remove domestic crimes
+  filter(Domestic != 'true')
+
+chi_violent.df<-chi_violent.df %>% 
+  mutate(Primary.Type.Clean = ifelse(Primary.Type == 'CRIM SEXUAL ASSAULT'
+                        | Primary.Type == 'CRIMINAL SEXUAL ASSAULT'
+                        | Primary.Type == 'SEX OFFENSE','SEXUAL', Primary.Type), # Sex crimes inconsistently tagged over time
+         Primary.Type.Clean = ifelse(Primary.Type.Clean == 'KIDNAPPING'
+                        | Primary.Type.Clean == 'INTIMIDATION'
+                        | Primary.Type.Clean == 'ARSON'
+                        | Primary.Type.Clean == 'SEXUAL','OTHER', Primary.Type.Clean)) # Group low occuring crimes
+                                                                                      # Added sexual b/c low frequency
+
+# Review Groupings
+chi_violent.df %>% 
+  group_by(Primary.Type.Clean, Primary.Type) %>% 
+  summarise(Crimes = n()) %>% 
+  arrange(Primary.Type.Clean)
+
+# Add a count for each row (used to count individual case IDs)
+chi_violent.df$count <- 1 
+
+# Summarize date by first of month (month start)
+chi_violent.df<-chi_violent.df %>% 
+  mutate(month = substr(Date,0,2),
+         month.start = paste0(Year,"-",month,"-01"))
+
+# Convert month.start to date
+chi_violent.df$month.start<-as.Date(chi_violent.df$month.start)
+
+# Get day of month
+chi_violent.df<-chi_violent.df %>%
+  mutate( DateFull = Date, # Rename old Date Column
+          day = substr(Date, 4,5), # Weekday
+          Date = as.Date(paste0(Year,"-",month,"-",day)), #Create new Date column (easier to use)
+          weekdayNum = wday(Date),
+          time = substr(DateFull, 12, 23),
+          hour = paste(substr(time,10,11),substr(time,0,2))) #Combine hour & AM/PM
+
+# Assign names to weekdays
+chi_violent.df$weekday <- recode(chi_violent.df$weekdayNum, 
+                                 "1"="Sunday",
+                                 "2"="Monday",
+                                 "3"="Tuesday",
+                                 "4"="Wednesday",
+                                 "5"="Thursday",
+                                 "6"="Friday",
+                                 "7"="Saturday")
+
+# Create 24hr format for graphs
+chi_violent.df$hour24<-recode(chi_violent.df$hour, 
+       "AM 12"= 00,
+       "AM 01"= 01,
+       "AM 02"= 02,
+       "AM 03"= 03,
+       "AM 04"= 04,
+       "AM 05"= 05,
+       "AM 06"= 06,
+       "AM 07"= 07,
+       "AM 08"= 08,
+       "AM 09"= 09,
+       "AM 10"= 10,
+       "AM 11"= 11,
+       "PM 12"= 12,
+       "PM 01"= 13,
+       "PM 02"= 14,
+       "PM 03"= 15,
+       "PM 04"= 16,
+       "PM 05"= 17,
+       "PM 06"= 18,
+       "PM 07"= 19,
+       "PM 08"= 20,
+       "PM 09"= 21,
+       "PM 10"= 22,
+       "PM 11"= 23)
+```
+### Write Tableau File
+```{r}
+#write.csv(chi_violent.df, "./Tableau/ChicagoPost2017.csv", row.names=FALSE)
+```
+
+
+
+
+
+
+
+## Analyze all Chicago Violent Crimes since 2018
+```{r}
+
+# Summarize data by year and Primary.Type.Clean
+annual.type<-chi_violent.df %>% 
+  group_by(Year, Primary.Type.Clean) %>% 
+  summarise(ByCategory = sum(count))
+
+# Add annual totals
+annual.type<-annual.type %>%
+  group_by(Year) %>% 
+  mutate(Total = sum(ByCategory),
+         pct = round(ByCategory/Total,3)*100)
+
+# Crimes - Total since 2018 by category
+annual.type %>% 
+  arrange(ByCategory) %>% 
+  ggplot(aes(x = Year, y = ByCategory, color = Primary.Type.Clean))+
+  geom_line()+
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  scale_color_brewer(palette = 'Accent')+
+  ggtitle('Chicago Crimes: Total by Category since 2018')
+
+# Crimes - Percent of Total
+annual.type %>% 
+  arrange(ByCategory) %>% 
+  ggplot(aes(x = Year, y = pct, fill = Primary.Type.Clean, label = pct))+
+  geom_bar(stat = 'identity')+
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  scale_fill_brewer(palette = 'Accent')+
+  geom_text(size = 3, position = position_stack(vjust = 0.5))+
+  ggtitle('Chicago Crimes: Percent of total since 2018')
+
+# Crimes - Total  
+for (i in unique(annual.type$Primary.Type.Clean)){
+
+chart<-annual.type %>%
+  filter(Primary.Type.Clean == i) %>% 
+  arrange(ByCategory) %>% 
+  ggplot(aes(x = Year, y = ByCategory))+
+  geom_col()+
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  scale_fill_brewer(palette = 'Accent')+
+  ggtitle(i,'since 2018')
+
+print(chart)
+}
+
+```
+
+### Heat Maps: Months & Years
+
+```{r}
+for (i in unique(chi_violent.df$Primary.Type.Clean)){
+
+heat<-chi_violent.df %>%
+  filter(Primary.Type.Clean == i) %>% 
+  group_by(Year, month) %>% 
+  summarise(crimes = sum(count)) %>% 
+  ggplot(aes(x = Year, y = month, fill = -crimes))+
+  geom_tile()+
+  geom_text(aes(label = format(round(crimes,0))))+
+  ggtitle(paste(i))
+
+print(heat)
+
+}
+```
+### Heatmaps: Days & Times
+```{r}
+
+for (i in unique(chi_violent.df$Primary.Type.Clean)){
+
+heat2<-chi_violent.df %>%
+  filter(Primary.Type.Clean == i) %>% 
+  group_by(weekdayNum, hour24) %>% 
+  summarise(crimes = sum(count)) %>% 
+  ggplot(aes(x = weekdayNum, y = hour24, fill = desc(crimes)))+
+  geom_tile()+
+  geom_text(aes(label = format(round(crimes,0))))+
+  ggtitle(i)+
+  scale_x_continuous(breaks = seq(1,7, by = 1))+
+  scale_y_continuous(breaks = seq(0,24, by = 2))
+
+print(heat2)
+ 
+}
+```
+
+### Word Clouds
+
+#### Word Cloud: 2022 Theft
+```{r}
+library(wordcloud2)
+library(RColorBrewer)
+library(wordcloud2)
+library(tm)
+
+
+# Word cloud for locations of theft in 2022
+descriptions <- chi_violent.df %>% 
+  filter(Primary.Type.Clean == 'THEFT' & Year == '2022') %>% 
+  select(Location.Description)
+
+descriptions<-gsub(' LOT','LOT', descriptions)
+docs <- Corpus(VectorSource(descriptions))
+
+docs <- docs %>%
+  tm_map(removeNumbers) %>%
+  tm_map(removePunctuation) %>%
+  tm_map(stripWhitespace)
+docs <- tm_map(docs, content_transformer(tolower))
+docs <- tm_map(docs, removeWords, stopwords("english"))
+
+dtm <- TermDocumentMatrix(docs) 
+matrix <- as.matrix(dtm) 
+words <- sort(rowSums(matrix),decreasing=TRUE) 
+df.T <- data.frame(word = names(words),freq=words)
+
+set.seed(1234) # for reproducibility 
+wordcloud2(df.T)
+```
+
+#### Word Cloud: 2022 Motor Vehicle Theft
+```{r}
+
+# Word cloud for locations of theft in 2022
+descriptions <- chi_violent.df %>% 
+  filter(Primary.Type.Clean == 'MOTOR VEHICLE THEFT' & Year == '2022') %>% 
+  select(Location.Description)
+
+descriptions<-gsub(' LOT','LOT', descriptions)
+docs <- Corpus(VectorSource(descriptions))
+
+docs <- docs %>%
+  tm_map(removeNumbers) %>%
+  tm_map(removePunctuation) %>%
+  tm_map(stripWhitespace)
+docs <- tm_map(docs, content_transformer(tolower))
+docs <- tm_map(docs, removeWords, stopwords("english"))
+
+dtm <- TermDocumentMatrix(docs) 
+matrix <- as.matrix(dtm) 
+words <- sort(rowSums(matrix),decreasing=TRUE) 
+df.MVT <- data.frame(word = names(words),freq=words)
+
+set.seed(1234) # for reproducibility 
+wordcloud2(df.MVT)
+```
+#### Word Cloud: 2022 BATTERY
+```{r}
+
+# Word cloud for locations of theft in 2022
+descriptions <- chi_violent.df %>% 
+  filter(Primary.Type.Clean == 'BATTERY' & Year == '2022') %>% 
+  select(Location.Description)
+
+descriptions<-gsub(' LOT','LOT', descriptions)
+docs <- Corpus(VectorSource(descriptions))
+
+docs <- docs %>%
+  tm_map(removeNumbers) %>%
+  tm_map(removePunctuation) %>%
+  tm_map(stripWhitespace)
+docs <- tm_map(docs, content_transformer(tolower))
+docs <- tm_map(docs, removeWords, stopwords("english"))
+
+dtm <- TermDocumentMatrix(docs) 
+matrix <- as.matrix(dtm) 
+words <- sort(rowSums(matrix),decreasing=TRUE) 
+df.B <- data.frame(word = names(words),freq=words)
+
+set.seed(1234) # for reproducibility 
+wordcloud2(df.B)
+```
+
